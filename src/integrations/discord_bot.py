@@ -43,10 +43,6 @@ class FoodieDiscordBot(commands.Bot):
         if message.author == self.user:
             return
         
-        # Only respond to DMs or mentions
-        if not isinstance(message.channel, discord.DMChannel) and not self.user.mentioned_in(message):
-            return
-        
         # Process commands first
         await self.process_commands(message)
         
