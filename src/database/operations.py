@@ -1,10 +1,29 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
-from src.database.models import User, Restaurant, MenuItem, UserFavorite, OrderHistory, Conversation
+from src.database.models import User, Restaurant, MenuItem, UserFavorite, OrderHistory
 from typing import List, Optional, Dict
 import logging
+import math
+import googlemaps
+from src.config import Config
 
 logger = logging.getLogger(__name__)
+
+def _get_haversine_formula(lat, lon, restaurant_model):
+    """
+    Helper function untuk formula Haversine (jarak) di SQL.
+    Mengembalikan kolom jarak dalam KM.
+    """
+    # 6371 = radius bumi dalam km
+    return (
+        6371 * func.acos(
+            func.cos(func.radians(lat)) *
+            func.cos(func.radians(restaurant_model.latitude)) *
+            func.cos(func.radians(restaurant_model.longitude) - func.radians(lon)) +
+            func.sin(func.radians(lat)) *
+            func.sin(func.radians(restaurant_model.latitude))
+        )
+    )
 
 class DatabaseOperations:
     """Database CRUD operations"""
@@ -47,12 +66,44 @@ class DatabaseOperations:
     # ===== RESTAURANT OPERATIONS =====
     
     def search_restaurants(self, location: str = None, budget: int = None,
-                          cuisine_type: str = None, category: str = None) -> List[Restaurant]:
+                          cuisine_type: str = None, category: str = None,
+                          radius_km: int = 5) -> List[Restaurant]:
         """Search restaurants based on criteria"""
         query = self.session.query(Restaurant)
         
         if location:
-            query = query.filter(Restaurant.location.ilike(f"%{location}%"))
+            try:
+                # 1. Geocode lokasi user
+                gmaps = googlemaps.Client(key=Config.GOOGLE_MAPS_API_KEY)
+                geocode_result = gmaps.geocode(location)
+                
+                if geocode_result:
+                    user_lat = geocode_result[0]['geometry']['location']['lat']
+                    user_lon = geocode_result[0]['geometry']['location']['lng']
+                    
+                    # 2. Buat kolom 'distance' menggunakan Haversine
+                    distance_col = _get_haversine_formula(user_lat, user_lon, Restaurant).label("distance")
+                    
+                    # 3. Query dengan filter jarak dan urutkan
+                    query = query.add_columns(distance_col).filter(
+                        Restaurant.latitude != None,  # Pastikan resto punya koordinat
+                        Restaurant.longitude != None,
+                        distance_col <= radius_km
+                    ).order_by(distance_col) # Urutkan berdasarkan terdekat
+                    
+                else:
+                    # Fallback ke pencarian teks lama jika geocoding gagal
+                    logger.warning(f"Gagal geocode '{location}', fallback ke pencarian teks.")
+                    query = query.filter(Restaurant.location.ilike(f"%{location}%"))
+
+            except Exception as e:
+                logger.error(f"Error geocoding '{location}', fallback ke pencarian teks: {e}")
+                query = query.filter(Restaurant.location.ilike(f"%{location}%"))
+            # --- AKHIR LOGIKA LOKASI BARU ---
+        
+        else:
+            # Jika tidak ada lokasi, urutkan berdasarkan rating
+            query = query.order_by(Restaurant.rating.desc())
         
         if budget:
             query = query.filter(Restaurant.avg_price <= budget)
@@ -63,7 +114,15 @@ class DatabaseOperations:
         if category:
             query = query.filter(Restaurant.category.ilike(f"%{category}%"))
         
-        restaurants = query.order_by(Restaurant.rating.desc()).limit(10).all()
+        results = query.limit(10).all()
+        
+        # Jika query pakai lokasi, hasilnya (Restaurant, distance)
+        # Kita hanya perlu return object Restaurant-nya
+        if location and results and isinstance(results[0], tuple):
+            restaurants = [r[0] for r in results] # Ambil object Restaurant (elemen pertama)
+        else:
+            restaurants = results
+
         return restaurants
     
     def get_restaurant_by_id(self, restaurant_id: int) -> Optional[Restaurant]:
@@ -158,29 +217,29 @@ class DatabaseOperations:
     
     # ===== CONVERSATION OPERATIONS =====
     
-    def save_conversation(self, user_id: int, role: str, content: str) -> Conversation:
-        """Save conversation message"""
-        conversation = Conversation(user_id=user_id, role=role, content=content)
-        self.session.add(conversation)
-        self.session.commit()
+    # def save_conversation(self, user_id: int, role: str, content: str) -> Conversation:
+    #     """Save conversation message"""
+    #     conversation = Conversation(user_id=user_id, role=role, content=content)
+    #     self.session.add(conversation)
+    #     self.session.commit()
         
-        return conversation
+    #     return conversation
     
-    def get_conversation_history(self, user_id: int, limit: int = 10) -> List[Conversation]:
-        """Get recent conversation history"""
-        conversations = self.session.query(Conversation).filter(
-            Conversation.user_id == user_id
-        ).order_by(Conversation.timestamp.desc()).limit(limit).all()
+    # def get_conversation_history(self, user_id: int, limit: int = 10) -> List[Conversation]:
+    #     """Get recent conversation history"""
+    #     conversations = self.session.query(Conversation).filter(
+    #         Conversation.user_id == user_id
+    #     ).order_by(Conversation.timestamp.desc()).limit(limit).all()
         
-        return list(reversed(conversations))
+    #     return list(reversed(conversations))
     
-    def clear_conversation_history(self, user_id: int) -> bool:
-        """Clear conversation history for user"""
-        self.session.query(Conversation).filter(Conversation.user_id == user_id).delete()
-        self.session.commit()
-        logger.info(f"Cleared conversation history for user {user_id}")
+    # def clear_conversation_history(self, user_id: int) -> bool:
+    #     """Clear conversation history for user"""
+    #     self.session.query(Conversation).filter(Conversation.user_id == user_id).delete()
+    #     self.session.commit()
+    #     logger.info(f"Cleared conversation history for user {user_id}")
         
-        return True
+    #     return True
     
     # ===== RECOMMENDATIONS =====
     

@@ -3,8 +3,16 @@ from src.database.connection import db_manager
 from src.database.operations import DatabaseOperations
 import logging
 import json
+import googlemaps
+from src.config import Config
 
 logger = logging.getLogger(__name__)
+
+try:
+    gmaps = googlemaps.Client(key=Config.GOOGLE_MAPS_API_KEY)
+except Exception as e:
+    logger.error(f"Failed to initialize Google Maps client: {e}")
+    gmaps = None
 
 def get_tools_definition() -> List[Dict]:
     """
@@ -24,7 +32,7 @@ def get_tools_definition() -> List[Dict]:
                             "description": "Lokasi restoran (contoh: Jakarta Selatan, Kemang, BSD)"
                         },
                         "budget": {
-                            "type": "integer",
+                            "type": ["integer", "null"],
                             "description": "Budget maksimal dalam Rupiah (contoh: 50000)"
                         },
                         "cuisine_type": {
@@ -34,8 +42,51 @@ def get_tools_definition() -> List[Dict]:
                         "category": {
                             "type": "string",
                             "description": "Kategori restoran (contoh: cafe, fine dining, fast food)"
+                        },
+                        "radius_km": {
+                            "type": "integer",
+                            "description": "Jarak radius pencarian dalam kilometer (default 5km)",
+                            "default": 5
                         }
                     }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_google_maps_restaurants",
+                "description": "Cari restoran di lokasi mana pun menggunakan Google Maps. Gunakan ini jika database internal tidak menemukan hasil atau jika lokasi berada di luar Jakarta.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Kueri pencarian (contoh: 'restoran murah dekat Jalan Kaliurang Yogyakarta')"
+                        },
+                        "budget": {
+                            "type": ["integer", "null"],
+                            "description": "Budget dalam Rupiah (opsional)"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_google_maps_details",
+                "description": "Dapatkan detail info (website, no. telepon, jam buka) untuk restoran spesifik dari Google Maps menggunakan 'place_id'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "place_id": {
+                            "type": "string",
+                            "description": "ID unik Google Places untuk restoran, didapat dari 'search_google_maps_restaurants'."
+                        }
+                    },
+                    "required": ["place_id"]
                 }
             }
         },
@@ -164,7 +215,7 @@ def get_tools_definition() -> List[Dict]:
                             "enum": ["happy", "sad", "stressed", "hungry", "romantic", "quick"]
                         },
                         "budget": {
-                            "type": "integer",
+                            "type": ["integer", "null"],
                             "description": "Budget maksimal"
                         },
                         "location": {
@@ -215,11 +266,16 @@ def execute_tool(function_name: str, arguments: Dict[str, Any]) -> Dict[str, Any
             db_ops = DatabaseOperations(session)
             
             if function_name == "search_restaurants":
+                location = arguments.get("location")
+                budget = arguments.get("budget")
+                cuisine_type = arguments.get("cuisine_type")
+                category = arguments.get("category")
+
                 restaurants = db_ops.search_restaurants(
-                    location=arguments.get("location"),
-                    budget=arguments.get("budget"),
-                    cuisine_type=arguments.get("cuisine_type"),
-                    category=arguments.get("category")
+                    location=location,
+                    budget=budget,
+                    cuisine_type=cuisine_type,
+                    category=category
                 )
                 
                 result = []
@@ -239,6 +295,83 @@ def execute_tool(function_name: str, arguments: Dict[str, Any]) -> Dict[str, Any
                     "data": result,
                     "message": f"Ditemukan {len(result)} restoran"
                 }
+            
+            elif function_name == "search_google_maps_restaurants":
+                if not gmaps:
+                    return {"success": False, "message": "Google Maps API client tidak terinisialisasi. Periksa API Key."}
+                
+                query = arguments.get("query")
+                
+                # Google Maps API memiliki 'price_level' (0-4), bukan budget integer
+                # Kita bisa tambahkan 'murah', 'sedang', 'mahal' ke query
+                budget = arguments.get("budget")
+                if budget:
+                    if budget <= 30000:
+                        query = f"murah {query}"
+                    elif budget <= 70000:
+                        query = f"sedang {query}"
+                    else:
+                        query = f"mewah {query}"
+
+                places_result = gmaps.places(query=query, region="ID", language="id")
+                
+                results = []
+                for place in places_result.get("results", [])[:5]: # Ambil 5 teratas
+                    results.append({
+                        "name": place.get("name"),
+                        "location": place.get("vicinity", place.get("formatted_address")),
+                        "rating": place.get("rating", 0),
+                        "total_ratings": place.get("user_ratings_total", 0),
+                        "place_id": place.get("place_id"),
+                        "price_level": place.get("price_level", "N/A"),
+                        "status": place.get("business_status", "N/A")
+                    })
+                
+                return {
+                    "success": True,
+                    "data": results,
+                    "message": f"Ditemukan {len(results)} restoran dari Google Maps"
+                }
+            
+            elif function_name == "get_google_maps_details":
+                if not gmaps:
+                    return {"success": False, "message": "Google Maps API client tidak terinisialisasi."}
+                
+                place_id = arguments.get("place_id")
+                if not place_id:
+                    return {"success": False, "message": "Error: 'place_id' diperlukan."}
+                
+                # Tentukan field apa saja yang kita inginkan (untuk menghemat biaya API)
+                fields = ['name', 'website', 'formatted_phone_number', 'opening_hours', 'vicinity']
+                
+                try:
+                    details_result = gmaps.place(
+                        place_id=place_id,
+                        fields=fields,
+                        language="id"
+                    )
+                    
+                    result_data = details_result.get('result', {})
+                    
+                    # Format jam buka agar lebih mudah dibaca LLM
+                    opening_hours = "Tidak diketahui"
+                    if 'opening_hours' in result_data:
+                        opening_hours = ", ".join(result_data['opening_hours'].get('weekday_text', []))
+
+                    return {
+                        "success": True,
+                        "data": {
+                            "name": result_data.get('name'),
+                            "address": result_data.get('vicinity'),
+                            "website": result_data.get('website', 'Tidak ada website'),
+                            "phone": result_data.get('formatted_phone_number', 'Tidak ada telepon'),
+                            "opening_hours": opening_hours
+                        },
+                        "message": "Detail restoran berhasil diambil dari Google Maps."
+                    }
+                except Exception as e:
+                    logger.error(f"Google Maps Place Details API error: {e}")
+                    return {"success": False, "message": f"Google Maps API Error: {str(e)}"}
             
             elif function_name == "get_restaurant_details":
                 restaurant = db_ops.get_restaurant_by_id(arguments["restaurant_id"])

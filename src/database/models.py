@@ -11,8 +11,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     discord_id = Column(String(100), unique=True, nullable=False)
     username = Column(String(100))
-    default_budget = Column(Integer, default=50000)
-    default_location = Column(String(200))
+    default_budget = Column(Integer, default=30000)
+    default_location = Column(String(200), default="Yogyakarta")
     preferences = Column(JSON)
     created_at = Column(TIMESTAMP, default=datetime.utcnow)
     updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -20,7 +20,7 @@ class User(Base):
     # Relationships
     favorites = relationship("UserFavorite", back_populates="user")
     orders = relationship("OrderHistory", back_populates="user")
-    conversations = relationship("Conversation", back_populates="user")
+    # conversations = relationship("Conversation", back_populates="user")
 
 class Restaurant(Base):
     __tablename__ = 'restaurants'
@@ -28,6 +28,8 @@ class Restaurant(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(200), nullable=False)
     location = Column(String(200), nullable=False)
+    latitude = Column(DECIMAL(10, 8))
+    longitude = Column(DECIMAL(11, 8))
     category = Column(String(100))
     price_range = Column(String(50))
     avg_price = Column(Integer)
@@ -88,14 +90,14 @@ class OrderHistory(Base):
     user = relationship("User", back_populates="orders")
     restaurant = relationship("Restaurant", back_populates="orders")
 
-class Conversation(Base):
-    __tablename__ = 'conversations'
+# class Conversation(Base):
+#     __tablename__ = 'conversations'
     
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id'))
-    role = Column(String(20), nullable=False)
-    content = Column(Text, nullable=False)
-    timestamp = Column(TIMESTAMP, default=datetime.utcnow)
+#     id = Column(Integer, primary_key=True)
+#     user_id = Column(Integer, ForeignKey('users.id'))
+#     role = Column(String(20), nullable=False)
+#     content = Column(Text, nullable=False)
+#     timestamp = Column(TIMESTAMP, default=datetime.utcnow)
     
-    # Relationships
-    user = relationship("User", back_populates="conversations")
+#     # Relationships
+#     user = relationship("User", back_populates="conversations")

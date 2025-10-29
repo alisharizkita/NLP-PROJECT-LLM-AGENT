@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.database.connection import db_manager
 from src.database.models import Restaurant, MenuItem
 from src.utils.logger import setup_logger
+import googlemaps
+from src.config import Config
 
 logger = setup_logger()
 
@@ -193,6 +195,41 @@ SAMPLE_RESTAURANTS = [
             {"name": "Margherita Pizza", "price": 95000, "category": "Pizza", "description": "Pizza klasik dengan tomat dan basil"},
             {"name": "Tiramisu", "price": 45000, "category": "Dessert", "description": "Dessert khas Italia"},
         ]
+    },
+    {
+        "name": "Warung Spesial Sambal (SS) Pogung",
+        "location": "Pogung Lor, Sinduadi, Mlati, Sleman Regency, Special Region of Yogyakarta",
+        "category": "Indonesian",
+        "price_range": "Rp 15.000 - 40.000",
+        "avg_price": 25000,
+        "rating": 4.6,
+        "cuisine_type": "Indonesian",
+        "opening_hours": "10:00 - 22:00",
+        "contact": "0274-123456",
+        "description": "Penyetan dengan puluhan jenis sambal pedas.",
+        "menu": [
+            {"name": "Ayam Goreng", "price": 18000, "category": "Main Course", "description": "Ayam goreng + lalapan"},
+            {"name": "Lele Goreng", "price": 15000, "category": "Main Course", "description": "Lele goreng crispy"},
+            {"name": "Nasi Putih", "price": 5000, "category": "Side Dish", "description": "Nasi putih porsi biasa"},
+            {"name": "Sambal Bawang", "price": 3000, "category": "Sambal", "description": "Sambal bawang pedas mantap"},
+        ]
+    },
+    {
+        "name": "Bumiayu (Daging Sapi) Jalan Kaliurang",
+        "location": "Jalan Kaliurang KM 5, Caturtunggal, Depok, Sleman Regency, Special Region of Yogyakarta",
+        "category": "Indonesian",
+        "price_range": "Rp 20.000 - 50.000",
+        "avg_price": 30000,
+        "rating": 4.5,
+        "cuisine_type": "Javanese",
+        "opening_hours": "08:00 - 21:00",
+        "contact": "0274-654321",
+        "description": "Restoran masakan Jawa spesial daging sapi.",
+        "menu": [
+            {"name": "Tongseng Sapi", "price": 28000, "category": "Main Course", "description": "Tongseng daging sapi kuah kental"},
+            {"name": "Sate Sapi", "price": 30000, "category": "Main Course", "description": "Sate sapi 10 tusuk"},
+            {"name": "Es Teh Manis", "price": 5000, "category": "Beverage", "description": "Es teh manis segar"},
+        ]
     }
 ]
 
@@ -201,12 +238,38 @@ def seed_database():
     try:
         logger.info("Initializing database...")
         db_manager.initialize()
+
+        if not Config.GOOGLE_MAPS_API_KEY:
+            logger.error("GOOGLE_MAPS_API_KEY not set in .env file!")
+            print("\n❌ Error: GOOGLE_MAPS_API_KEY belum di-set di .env file.")
+            return
+        gmaps = googlemaps.Client(key=Config.GOOGLE_MAPS_API_KEY)
+
+        logger.info("Dropping old tables (if they exist)...")
+        db_manager.drop_tables()
+
         db_manager.create_tables()
         
         logger.info("Seeding restaurant data...")
         
         with db_manager.get_session() as session:
             for resto_data in SAMPLE_RESTAURANTS:
+
+                try:
+                    geocode_result = gmaps.geocode(resto_data["location"])
+                    if geocode_result:
+                        lat = geocode_result[0]['geometry']['location']['lat']
+                        lng = geocode_result[0]['geometry']['location']['lng']
+                        resto_data['latitude'] = lat
+                        resto_data['longitude'] = lng
+                        logger.info(f"Geocoded '{resto_data['name']}': {lat}, {lng}")
+                    else:
+                        logger.warning(f"Could not geocode location: {resto_data['location']}. Skipping.")
+                        continue # Skip restoran ini jika tidak ketemu lokasinya
+                except Exception as e:
+                    logger.error(f"Error geocoding {resto_data['location']}: {e}")
+                    continue
+
                 # Create restaurant
                 menu_items = resto_data.pop("menu")
                 

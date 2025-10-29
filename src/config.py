@@ -24,6 +24,9 @@ class Config:
     # Agent Settings
     MAX_CONVERSATION_HISTORY = int(os.getenv("MAX_CONVERSATION_HISTORY", "10"))
     RESPONSE_TIMEOUT = int(os.getenv("RESPONSE_TIMEOUT", "30"))
+
+    # Google Maps API
+    GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
     
     @classmethod
     def validate(cls):
@@ -31,7 +34,8 @@ class Config:
         required = [
             ("GROQ_API_KEY", cls.GROQ_API_KEY),
             ("DISCORD_BOT_TOKEN", cls.DISCORD_BOT_TOKEN),
-            ("DATABASE_URL", cls.DATABASE_URL)
+            ("DATABASE_URL", cls.DATABASE_URL),
+            ("GOOGLE_MAPS_API_KEY", cls.GOOGLE_MAPS_API_KEY),
         ]
         
         missing = [name for name, value in required if not value]
