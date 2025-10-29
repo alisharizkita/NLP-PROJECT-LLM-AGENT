@@ -1,0 +1,7 @@
+googlemaps
+sqlalchemy
+dotenv
+colorlog
+psycopg2
+groq
+discord
