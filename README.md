@@ -48,10 +48,15 @@ Built with **Python**, **Groq API**, **Discord**, **OpenWeather API**, and **Goo
 ```bash
 git clone https://github.com/username/foodiebot.git
 cd foodiebot
+``` bash
 
+### 2️⃣ Virtual Environment
+```bash
 python -m venv venv
 source venv/bin/activate  # Mac/Linux
 venv\Scripts\activate     # Windows
+```bash
 
+### 3️⃣ Install Dependencies
 pip install -r requirements.txt
 ```bash
