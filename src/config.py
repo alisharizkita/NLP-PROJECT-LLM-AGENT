@@ -14,8 +14,9 @@ class Config:
     DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
     DISCORD_COMMAND_PREFIX = os.getenv("DISCORD_COMMAND_PREFIX", "!")
     
-    # Database
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/foodiebot")
+    # Weather API (OpenWeatherMap - Free)
+    WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+    WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
     
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -24,9 +25,9 @@ class Config:
     # Agent Settings
     MAX_CONVERSATION_HISTORY = int(os.getenv("MAX_CONVERSATION_HISTORY", "10"))
     RESPONSE_TIMEOUT = int(os.getenv("RESPONSE_TIMEOUT", "30"))
-
-    # Google Maps API
-    GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+    
+    # Default Location for Weather
+    DEFAULT_LOCATION = os.getenv("DEFAULT_LOCATION", "Jakarta")
     
     @classmethod
     def validate(cls):
@@ -34,13 +35,15 @@ class Config:
         required = [
             ("GROQ_API_KEY", cls.GROQ_API_KEY),
             ("DISCORD_BOT_TOKEN", cls.DISCORD_BOT_TOKEN),
-            ("DATABASE_URL", cls.DATABASE_URL),
-            ("GOOGLE_MAPS_API_KEY", cls.GOOGLE_MAPS_API_KEY),
         ]
         
         missing = [name for name, value in required if not value]
         
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        
+        # Weather API is optional but recommended
+        if not cls.WEATHER_API_KEY:
+            print("⚠️  Warning: WEATHER_API_KEY not set. Weather features will be disabled.")
         
         return True

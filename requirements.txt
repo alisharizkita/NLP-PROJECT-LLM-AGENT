@@ -1,7 +1,15 @@
-googlemaps
-sqlalchemy
-dotenv
-colorlog
-psycopg2
-groq
-discord
+# Core dependencies
+groq==0.9.0
+discord.py==2.3.2
+python-dotenv==1.0.0
+
+# HTTP requests for Weather API
+requests==2.31.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+
+# Logging
+colorlog==6.8.0

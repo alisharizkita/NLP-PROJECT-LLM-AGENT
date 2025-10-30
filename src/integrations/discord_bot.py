@@ -1,7 +1,6 @@
 import discord
 from discord.ext import commands
 from src.agent.agent_core import FoodieAgent
-from src.database.connection import db_manager
 from src.config import Config
 import logging
 
@@ -28,12 +27,13 @@ class FoodieDiscordBot(commands.Bot):
         """Called when bot is ready"""
         logger.info(f"Bot logged in as {self.user.name} ({self.user.id})")
         print(f"✅ FoodieBot is online as {self.user.name}!")
+        print(f"📊 Ready to serve food recommendations!")
         
         # Set bot status
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="food recommendations 🍕"
+                name="food recommendations 🍕 | !help"
             )
         )
     
@@ -41,6 +41,10 @@ class FoodieDiscordBot(commands.Bot):
         """Handle incoming messages"""
         # Ignore bot's own messages
         if message.author == self.user:
+            return
+        
+        # Only respond to DMs or mentions
+        if not isinstance(message.channel, discord.DMChannel) and not self.user.mentioned_in(message):
             return
         
         # Process commands first
@@ -75,8 +79,11 @@ class FoodieDiscordBot(commands.Bot):
                 else:
                     # Split long messages
                     chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
-                    for chunk in chunks:
-                        await message.channel.send(chunk)
+                    for i, chunk in enumerate(chunks):
+                        if i == 0:
+                            await message.reply(chunk)
+                        else:
+                            await message.channel.send(chunk)
             
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
@@ -86,11 +93,11 @@ class FoodieDiscordBot(commands.Bot):
 def setup_commands(bot: FoodieDiscordBot):
     """Setup bot commands"""
     
-    @bot.command(name="help", aliases=["bantuan"])
+    @bot.command(name="help", aliases=["bantuan", "h"])
     async def help_command(ctx):
         """Show help message"""
         embed = discord.Embed(
-            title="🍕 FoodieBot - Asisten Rekomendasi Makanan",
+            title="🍕 FoodieBot - Your Food Companion!",
             description="Aku bantu kamu cari makanan yang pas! Chat langsung atau mention aku.",
             color=discord.Color.orange()
         )
@@ -98,30 +105,34 @@ def setup_commands(bot: FoodieDiscordBot):
         embed.add_field(
             name="💬 Cara Pakai",
             value=(
-                "• DM aku langsung, atau\n"
-                "• Mention aku di channel: @FoodieBot pesan kamu\n"
-                "• Ceritain budget, lokasi, atau mood kamu!"
+                "• **DM aku langsung**, atau\n"
+                "• **Mention** aku di channel: `@FoodieBot pesan kamu`\n"
+                "• Ceritain budget, lokasi, mood, atau cuaca!"
             ),
             inline=False
         )
         
         embed.add_field(
-            name="✨ Fitur",
+            name="✨ Aku Bisa Bantu:",
             value=(
-                "• Rekomendasi berdasarkan budget, lokasi, mood\n"
-                "• Info lengkap restoran & menu\n"
-                "• Simpan favorit\n"
-                "• Track riwayat pesanan"
+                "🍽️ Rekomendasi makanan (budget, mood, cuaca)\n"
+                "📝 Resep masakan & tips memasak\n"
+                "📊 Hitung kalori makanan\n"
+                "🌤️ Saran makanan sesuai cuaca\n"
+                "💡 Nutrition advice & diet tips\n"
+                "🗺️ Info kuliner daerah"
             ),
             inline=False
         )
         
         embed.add_field(
-            name="🎯 Contoh",
+            name="🎯 Contoh Chat:",
             value=(
-                '`"Lagi laper, budget 50rb daerah Kemang"`\n'
-                '`"Lagi happy, mau dessert enak"`\n'
-                '`"Cari resto romantis buat date"`'
+                '`"Budget 30rb mau makan enak"`\n'
+                '`"Lagi hujan, cocoknya makan apa?"`\n'
+                '`"Kalori nasi goreng berapa?"`\n'
+                '`"Resep ayam goreng crispy dong"`\n'
+                '`"Lagi diet, rekomendasi makanan?"`'
             ),
             inline=False
         )
@@ -129,15 +140,17 @@ def setup_commands(bot: FoodieDiscordBot):
         embed.add_field(
             name="⚙️ Commands",
             value=(
-                "`!help` - Bantuan\n"
+                "`!help` - Tampilkan menu ini\n"
                 "`!reset` - Reset conversation\n"
-                "`!profile` - Lihat profil kamu\n"
-                "`!ping` - Cek bot status"
+                "`!stats` - Lihat statistik chat kamu\n"
+                "`!ping` - Cek bot status\n"
+                "`!about` - Tentang FoodieBot"
             ),
             inline=False
         )
         
-        embed.set_footer(text="Dibuat dengan ❤️ untuk pecinta kuliner")
+        embed.set_footer(text="Dibuat dengan ❤️ untuk pecinta kuliner | Powered by Groq AI")
+        embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
         
         await ctx.send(embed=embed)
     
@@ -145,31 +158,38 @@ def setup_commands(bot: FoodieDiscordBot):
     async def reset_command(ctx):
         """Reset conversation history"""
         response = bot.agent.reset_conversation(str(ctx.author.id))
-        await ctx.send(response)
+        await ctx.send(f"🔄 {response}")
     
-    @bot.command(name="profile", aliases=["profil"])
-    async def profile_command(ctx):
-        """Show user profile"""
-        user_info = bot.agent.get_user_info(str(ctx.author.id))
+    @bot.command(name="stats", aliases=["statistik"])
+    async def stats_command(ctx):
+        """Show user statistics"""
+        stats = bot.agent.get_conversation_stats(str(ctx.author.id))
         
         embed = discord.Embed(
-            title=f"👤 Profil {ctx.author.name}",
+            title=f"📊 Statistik Chat {ctx.author.name}",
             color=discord.Color.blue()
         )
         
         embed.add_field(
-            name="Budget Default",
-            value=f"Rp {user_info.get('default_budget', 0):,}",
+            name="Total Pesan",
+            value=f"{stats['total_messages']} pesan",
             inline=True
         )
         
         embed.add_field(
-            name="Lokasi Default",
-            value=user_info.get('default_location', 'Belum diset'),
+            name="Pesan Kamu",
+            value=f"{stats['user_messages']} pesan",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="Pesan Bot",
+            value=f"{stats['bot_messages']} pesan",
             inline=True
         )
         
         embed.set_thumbnail(url=ctx.author.avatar.url if ctx.author.avatar else None)
+        embed.set_footer(text="Data disimpan selama bot online")
         
         await ctx.send(embed=embed)
     
@@ -177,49 +197,96 @@ def setup_commands(bot: FoodieDiscordBot):
     async def ping_command(ctx):
         """Check bot latency"""
         latency = round(bot.latency * 1000)
-        await ctx.send(f"🏓 Pong! Latency: {latency}ms")
+        
+        embed = discord.Embed(
+            title="🏓 Pong!",
+            description=f"Latency: **{latency}ms**",
+            color=discord.Color.green()
+        )
+        
+        # Add active users count
+        active_users = bot.agent.get_active_users_count()
+        embed.add_field(
+            name="Active Users",
+            value=f"{active_users} users",
+            inline=True
+        )
+        
+        await ctx.send(embed=embed)
     
-    @bot.command(name="about", aliases=["tentang"])
+    @bot.command(name="about", aliases=["tentang", "info"])
     async def about_command(ctx):
         """About the bot"""
         embed = discord.Embed(
             title="🤖 Tentang FoodieBot",
             description=(
-                "FoodieBot adalah AI agent yang membantu kamu menemukan "
-                "makanan yang pas berdasarkan budget, lokasi, mood, dan preferensi kamu!"
+                "FoodieBot adalah AI-powered food companion yang membantu kamu "
+                "menemukan makanan yang pas dengan budget, mood, dan cuaca kamu!"
             ),
             color=discord.Color.green()
         )
         
         embed.add_field(
-            name="🧠 Powered by",
-            value="Groq API (Llama 3.1 70B)",
+            name="🧠 AI Model",
+            value="Groq API - Llama 3.1 70B",
             inline=True
         )
         
         embed.add_field(
-            name="💾 Database",
-            value="PostgreSQL",
+            name="🌤️ Weather Data",
+            value="OpenWeatherMap API",
             inline=True
         )
         
         embed.add_field(
-            name="📚 Features",
-            value="Recommendation • Favorites • History • Smart Search",
+            name="💾 Storage",
+            value="In-Memory (session-based)",
+            inline=True
+        )
+        
+        embed.add_field(
+            name="✨ Special Features",
+            value=(
+                "• Conversation memory\n"
+                "• Weather-aware recommendations\n"
+                "• Calorie calculator\n"
+                "• Mood-based suggestions\n"
+                "• Recipe knowledge"
+            ),
             inline=False
         )
         
+        embed.add_field(
+            name="👨‍💻 Developer",
+            value="[Your Name] - NLP Project",
+            inline=False
+        )
+        
+        embed.set_thumbnail(url=bot.user.avatar.url if bot.user.avatar else None)
+        embed.set_footer(text="Made with ❤️ | Open Source")
+        
         await ctx.send(embed=embed)
+    
+    @bot.command(name="weather", aliases=["cuaca"])
+    async def weather_command(ctx, *, location: str = None):
+        """Check weather (manual command)"""
+        if not location:
+            location = Config.DEFAULT_LOCATION
+        
+        # Use agent to get weather
+        message = f"Bagaimana cuaca di {location}?"
+        response = bot.agent.process_message(
+            str(ctx.author.id),
+            ctx.author.name,
+            message
+        )
+        
+        await ctx.send(response)
 
 
 def run_discord_bot():
     """Initialize and run Discord bot"""
     try:
-        # Initialize database
-        db_manager.initialize()
-        db_manager.create_tables()
-        logger.info("Database initialized")
-        
         # Create bot instance
         bot = FoodieDiscordBot()
         
@@ -228,13 +295,13 @@ def run_discord_bot():
         
         # Run bot
         logger.info("Starting Discord bot...")
+        print("\n🚀 Starting FoodieBot...")
+        print("="*60)
         bot.run(Config.DISCORD_BOT_TOKEN)
     
     except Exception as e:
         logger.error(f"Error running Discord bot: {e}")
         raise
-    finally:
-        db_manager.close()
 
 
 if __name__ == "__main__":

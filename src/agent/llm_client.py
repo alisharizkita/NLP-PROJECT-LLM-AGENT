@@ -37,22 +37,52 @@ class GroqClient:
                 "temperature": temperature,
                 "max_tokens": max_tokens
             }
-            
+
+            # Format tools agar valid untuk Groq API
             if tools:
-                params["tools"] = tools
+                formatted_tools = []
+                for tool in tools:
+                    # Pastikan tool berisi struktur {'type': 'function', 'function': {...}}
+                    if "type" not in tool or tool.get("type") != "function":
+                        formatted_tools.append({
+                            "type": "function",
+                            "function": tool
+                        })
+                    else:
+                        formatted_tools.append(tool)
+                params["tools"] = formatted_tools
                 params["tool_choice"] = "auto"
+
+            # Tambahkan sistem pesan agar LLM tidak bikin restoran fiktif
+            if tools:
+                system_message = {
+                    "role": "system",
+                    "content": (
+                        "Kamu adalah asisten yang hanya boleh memberikan rekomendasi restoran "
+                        "berdasarkan hasil dari tool yang tersedia. Jika diminta mencari restoran, "
+                        "gunakan tool pencarian dan jangan membuat nama restoran sendiri. "
+                        "Selalu kembalikan hasil dari tool dalam konteks jawaban yang alami."
+                    )
+                }
+                # Jika belum ada system message, tambahkan di depan
+                if not any(m["role"] == "system" for m in messages):
+                    messages.insert(0, system_message)
+                else:
+                    messages[0] = system_message
+
+            params["messages"] = messages
             
+            # Kirim ke Groq API
             response = self.client.chat.completions.create(**params)
-            
             message = response.choices[0].message
-            
-            # Log the interaction
+
+            # Log untuk debugging
             logger.debug(f"LLM Request: {messages[-1]['content'][:100]}...")
             logger.debug(f"LLM Response: {message.content[:100] if message.content else 'Function call'}...")
             
             return {
                 "content": message.content,
-                "tool_calls": message.tool_calls if hasattr(message, 'tool_calls') else None,
+                "tool_calls": getattr(message, "tool_calls", None),
                 "role": message.role
             }
             

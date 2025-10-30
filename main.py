@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-FoodieBot - Food Recommendation Agent
-Main entry point for the application
+FoodieBot - AI Food Recommendation Agent
+Pure LLM with Weather API Integration
 """
 
 import sys
@@ -27,12 +27,13 @@ def main():
         logger.info("Configuration validated successfully")
         
         # Print startup banner
-        print("=" * 60)
+        print("\n" + "="*60)
         print("🍕 FoodieBot - AI Food Recommendation Agent")
-        print("=" * 60)
-        print(f"Model: {Config.GROQ_MODEL}")
-        print(f"Database: {Config.DATABASE_URL.split('@')[1] if '@' in Config.DATABASE_URL else 'Local'}")
-        print("=" * 60)
+        print("="*60)
+        print(f"🧠 Model: {Config.GROQ_MODEL}")
+        print(f"💾 Storage: In-Memory (session-based)")
+        print(f"🌤️  Weather: {'Enabled' if Config.WEATHER_API_KEY else 'Disabled'}")
+        print("="*60)
         print()
         
         # Start Discord bot
@@ -42,8 +43,12 @@ def main():
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         print(f"\n❌ Configuration Error: {e}")
-        print("\nMake sure you have created a .env file with all required variables.")
-        print("Check .env.example for reference.")
+        print("\n💡 Tips:")
+        print("1. Make sure you have created a .env file")
+        print("2. Check .env.example for required variables")
+        print("3. Get Groq API key at: https://console.groq.com")
+        print("4. Get Discord token at: https://discord.com/developers")
+        print("5. Get Weather API key at: https://openweathermap.org/api (optional)")
         sys.exit(1)
         
     except KeyboardInterrupt:

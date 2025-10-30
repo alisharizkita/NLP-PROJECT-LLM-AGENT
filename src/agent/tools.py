@@ -1,258 +1,107 @@
 from typing import Dict, List, Any
-from src.database.connection import db_manager
-from src.database.operations import DatabaseOperations
-import logging
-import json
-import googlemaps
+import requests
 from src.config import Config
+import logging
+import os
+import json
 
 logger = logging.getLogger(__name__)
 
-try:
-    gmaps = googlemaps.Client(key=Config.GOOGLE_MAPS_API_KEY)
-except Exception as e:
-    logger.error(f"Failed to initialize Google Maps client: {e}")
-    gmaps = None
-
 def get_tools_definition() -> List[Dict]:
     """
-    Get OpenAI function calling format tool definitions
+    Get tool definitions for function calling
     """
-    return [
+    tools = [
         {
             "type": "function",
             "function": {
-                "name": "search_restaurants",
-                "description": "Cari restoran berdasarkan lokasi, budget, jenis masakan, atau kategori",
+                "name": "get_weather",
+                "description": "Dapatkan informasi cuaca saat ini untuk lokasi tertentu. Gunakan ini untuk memberikan rekomendasi makanan yang sesuai dengan cuaca.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "location": {
                             "type": "string",
-                            "description": "Lokasi restoran (contoh: Jakarta Selatan, Kemang, BSD)"
-                        },
-                        "budget": {
-                            "type": ["integer", "null"],
-                            "description": "Budget maksimal dalam Rupiah (contoh: 50000)"
-                        },
-                        "cuisine_type": {
+                            "description": "Nama kota (contoh: Jakarta, Bandung, Surabaya)"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "calculate_calories",
+                "description": "Hitung estimasi kalori untuk makanan tertentu",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "food_name": {
                             "type": "string",
-                            "description": "Jenis masakan (contoh: Indonesian, Japanese, Italian)"
+                            "description": "Nama makanan (contoh: nasi goreng, ayam bakar)"
                         },
-                        "category": {
+                        "portion": {
                             "type": "string",
-                            "description": "Kategori restoran (contoh: cafe, fine dining, fast food)"
-                        },
-                        "radius_km": {
-                            "type": "integer",
-                            "description": "Jarak radius pencarian dalam kilometer (default 5km)",
-                            "default": 5
+                            "description": "Ukuran porsi (small/medium/large)",
+                            "enum": ["small", "medium", "large"]
                         }
-                    }
+                    },
+                    "required": ["food_name"]
                 }
             }
         },
         {
             "type": "function",
             "function": {
-                "name": "search_google_maps_restaurants",
-                "description": "Cari restoran di lokasi mana pun menggunakan Google Maps. Gunakan ini jika database internal tidak menemukan hasil atau jika lokasi berada di luar Jakarta.",
+                "name": "get_meal_time_recommendation",
+                "description": "Dapatkan rekomendasi makanan berdasarkan waktu (pagi/siang/malam)",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {
+                        "time_of_day": {
                             "type": "string",
-                            "description": "Kueri pencarian (contoh: 'restoran murah dekat Jalan Kaliurang Yogyakarta')"
-                        },
-                        "budget": {
-                            "type": ["integer", "null"],
-                            "description": "Budget dalam Rupiah (opsional)"
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_google_maps_details",
-                "description": "Dapatkan detail info (website, no. telepon, jam buka) untuk restoran spesifik dari Google Maps menggunakan 'place_id'.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "place_id": {
-                            "type": "string",
-                            "description": "ID unik Google Places untuk restoran, didapat dari 'search_google_maps_restaurants'."
-                        }
-                    },
-                    "required": ["place_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_restaurant_details",
-                "description": "Dapatkan detail lengkap restoran termasuk menu",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "restaurant_id": {
-                            "type": "integer",
-                            "description": "ID restoran"
-                        }
-                    },
-                    "required": ["restaurant_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "add_to_favorites",
-                "description": "Tambahkan restoran ke daftar favorit user",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "ID user"
-                        },
-                        "restaurant_id": {
-                            "type": "integer",
-                            "description": "ID restoran"
-                        }
-                    },
-                    "required": ["user_id", "restaurant_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_favorites",
-                "description": "Dapatkan daftar restoran favorit user",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "ID user"
-                        }
-                    },
-                    "required": ["user_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "save_order",
-                "description": "Simpan pesanan ke history",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "ID user"
-                        },
-                        "restaurant_id": {
-                            "type": "integer",
-                            "description": "ID restoran"
-                        },
-                        "menu_items": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Daftar menu yang dipesan"
-                        },
-                        "total_price": {
-                            "type": "integer",
-                            "description": "Total harga pesanan"
+                            "description": "Waktu makan",
+                            "enum": ["breakfast", "lunch", "dinner", "snack"]
                         },
                         "mood": {
                             "type": "string",
-                            "description": "Mood saat memesan"
+                            "description": "Mood user (opsional)",
+                            "enum": ["happy", "sad", "stressed", "energetic", "relaxed", "hungry"]
                         }
                     },
-                    "required": ["user_id", "restaurant_id", "menu_items", "total_price"]
+                    "required": ["time_of_day"]
                 }
             }
         },
         {
             "type": "function",
             "function": {
-                "name": "get_order_history",
-                "description": "Dapatkan riwayat pesanan user",
+                "name": "search_nearby_restaurants",
+                "description": "Mencari restoran valid di sekitar lokasi menggunakan Google Maps Places API.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "ID user"
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Jumlah maksimal riwayat yang ditampilkan",
-                            "default": 5
-                        }
-                    },
-                    "required": ["user_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "recommend_by_mood",
-                "description": "Rekomendasikan restoran berdasarkan mood user",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "mood": {
-                            "type": "string",
-                            "description": "Mood user (happy, sad, stressed, hungry, romantic, quick)",
-                            "enum": ["happy", "sad", "stressed", "hungry", "romantic", "quick"]
-                        },
-                        "budget": {
-                            "type": ["integer", "null"],
-                            "description": "Budget maksimal"
-                        },
                         "location": {
                             "type": "string",
-                            "description": "Lokasi preferensi"
-                        }
-                    },
-                    "required": ["mood"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_user_preferences",
-                "description": "Update preferensi default user (budget, lokasi)",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_id": {
-                            "type": "integer",
-                            "description": "ID user"
+                            "description": "Nama kota atau daerah untuk pencarian restoran."
                         },
-                        "default_budget": {
+                        "radius": {
                             "type": "integer",
-                            "description": "Budget default"
+                            "description": "Radius pencarian dalam meter (default 3000)."
                         },
-                        "default_location": {
+                        "keyword": {
                             "type": "string",
-                            "description": "Lokasi default"
+                            "description": "Kata kunci spesifik seperti 'sushi', 'cafe', dll (opsional)."
                         }
                     },
-                    "required": ["user_id"]
+                    "required": ["location"]
                 }
             }
         }
     ]
+    
+    return tools
 
 
 def execute_tool(function_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -262,267 +111,253 @@ def execute_tool(function_name: str, arguments: Dict[str, Any]) -> Dict[str, Any
     try:
         logger.info(f"Executing tool: {function_name} with args: {arguments}")
         
-        with db_manager.get_session() as session:
-            db_ops = DatabaseOperations(session)
-            
-            if function_name == "search_restaurants":
-                location = arguments.get("location")
-                budget = arguments.get("budget")
-                cuisine_type = arguments.get("cuisine_type")
-                category = arguments.get("category")
-
-                restaurants = db_ops.search_restaurants(
-                    location=location,
-                    budget=budget,
-                    cuisine_type=cuisine_type,
-                    category=category
-                )
-                
-                result = []
-                for r in restaurants:
-                    result.append({
-                        "id": r.id,
-                        "name": r.name,
-                        "location": r.location,
-                        "cuisine_type": r.cuisine_type,
-                        "avg_price": r.avg_price,
-                        "rating": float(r.rating) if r.rating else 0,
-                        "description": r.description
-                    })
-                
-                return {
-                    "success": True,
-                    "data": result,
-                    "message": f"Ditemukan {len(result)} restoran"
-                }
-            
-            elif function_name == "search_google_maps_restaurants":
-                if not gmaps:
-                    return {"success": False, "message": "Google Maps API client tidak terinisialisasi. Periksa API Key."}
-                
-                query = arguments.get("query")
-                
-                # Google Maps API memiliki 'price_level' (0-4), bukan budget integer
-                # Kita bisa tambahkan 'murah', 'sedang', 'mahal' ke query
-                budget = arguments.get("budget")
-                if budget:
-                    if budget <= 30000:
-                        query = f"murah {query}"
-                    elif budget <= 70000:
-                        query = f"sedang {query}"
-                    else:
-                        query = f"mewah {query}"
-
-                places_result = gmaps.places(query=query, region="ID", language="id")
-                
-                results = []
-                for place in places_result.get("results", [])[:5]: # Ambil 5 teratas
-                    results.append({
-                        "name": place.get("name"),
-                        "location": place.get("vicinity", place.get("formatted_address")),
-                        "rating": place.get("rating", 0),
-                        "total_ratings": place.get("user_ratings_total", 0),
-                        "place_id": place.get("place_id"),
-                        "price_level": place.get("price_level", "N/A"),
-                        "status": place.get("business_status", "N/A")
-                    })
-                
-                return {
-                    "success": True,
-                    "data": results,
-                    "message": f"Ditemukan {len(results)} restoran dari Google Maps"
-                }
-            
-            elif function_name == "get_google_maps_details":
-                if not gmaps:
-                    return {"success": False, "message": "Google Maps API client tidak terinisialisasi."}
-                
-                place_id = arguments.get("place_id")
-                if not place_id:
-                    return {"success": False, "message": "Error: 'place_id' diperlukan."}
-                
-                # Tentukan field apa saja yang kita inginkan (untuk menghemat biaya API)
-                fields = ['name', 'website', 'formatted_phone_number', 'opening_hours', 'vicinity']
-                
-                try:
-                    details_result = gmaps.place(
-                        place_id=place_id,
-                        fields=fields,
-                        language="id"
-                    )
-                    
-                    result_data = details_result.get('result', {})
-                    
-                    # Format jam buka agar lebih mudah dibaca LLM
-                    opening_hours = "Tidak diketahui"
-                    if 'opening_hours' in result_data:
-                        opening_hours = ", ".join(result_data['opening_hours'].get('weekday_text', []))
-
-                    return {
-                        "success": True,
-                        "data": {
-                            "name": result_data.get('name'),
-                            "address": result_data.get('vicinity'),
-                            "website": result_data.get('website', 'Tidak ada website'),
-                            "phone": result_data.get('formatted_phone_number', 'Tidak ada telepon'),
-                            "opening_hours": opening_hours
-                        },
-                        "message": "Detail restoran berhasil diambil dari Google Maps."
-                    }
-                except Exception as e:
-                    logger.error(f"Google Maps Place Details API error: {e}")
-                    return {"success": False, "message": f"Google Maps API Error: {str(e)}"}
-            
-            elif function_name == "get_restaurant_details":
-                restaurant = db_ops.get_restaurant_by_id(arguments["restaurant_id"])
-                
-                if not restaurant:
-                    return {"success": False, "message": "Restoran tidak ditemukan"}
-                
-                menu_items = db_ops.get_restaurant_menu(arguments["restaurant_id"])
-                
-                menu_list = []
-                for item in menu_items:
-                    menu_list.append({
-                        "id": item.id,
-                        "name": item.name,
-                        "price": item.price,
-                        "description": item.description,
-                        "category": item.category
-                    })
-                
-                return {
-                    "success": True,
-                    "data": {
-                        "id": restaurant.id,
-                        "name": restaurant.name,
-                        "location": restaurant.location,
-                        "cuisine_type": restaurant.cuisine_type,
-                        "avg_price": restaurant.avg_price,
-                        "rating": float(restaurant.rating) if restaurant.rating else 0,
-                        "opening_hours": restaurant.opening_hours,
-                        "contact": restaurant.contact,
-                        "description": restaurant.description,
-                        "menu": menu_list
-                    }
-                }
-            
-            elif function_name == "add_to_favorites":
-                favorite = db_ops.add_favorite(
-                    arguments["user_id"],
-                    arguments["restaurant_id"]
-                )
-                
-                return {
-                    "success": True,
-                    "message": "Restoran berhasil ditambahkan ke favorit!"
-                }
-            
-            elif function_name == "get_favorites":
-                favorites = db_ops.get_user_favorites(arguments["user_id"])
-                
-                result = []
-                for r in favorites:
-                    result.append({
-                        "id": r.id,
-                        "name": r.name,
-                        "location": r.location,
-                        "cuisine_type": r.cuisine_type,
-                        "avg_price": r.avg_price,
-                        "rating": float(r.rating) if r.rating else 0
-                    })
-                
-                return {
-                    "success": True,
-                    "data": result,
-                    "message": f"Kamu punya {len(result)} restoran favorit"
-                }
-            
-            elif function_name == "save_order":
-                order = db_ops.add_order(
-                    user_id=arguments["user_id"],
-                    restaurant_id=arguments["restaurant_id"],
-                    menu_items=arguments["menu_items"],
-                    total_price=arguments["total_price"],
-                    mood=arguments.get("mood")
-                )
-                
-                return {
-                    "success": True,
-                    "data": {"order_id": order.id},
-                    "message": "Pesanan berhasil disimpan!"
-                }
-            
-            elif function_name == "get_order_history":
-                orders = db_ops.get_user_orders(
-                    arguments["user_id"],
-                    limit=arguments.get("limit", 5)
-                )
-                
-                result = []
-                for order in orders:
-                    result.append({
-                        "id": order.id,
-                        "restaurant_id": order.restaurant_id,
-                        "menu_items": order.menu_items,
-                        "total_price": order.total_price,
-                        "order_date": order.order_date.isoformat(),
-                        "mood": order.mood,
-                        "rating": order.rating
-                    })
-                
-                return {
-                    "success": True,
-                    "data": result,
-                    "message": f"Riwayat {len(result)} pesanan terakhir"
-                }
-            
-            elif function_name == "recommend_by_mood":
-                restaurants = db_ops.get_recommendations_by_mood(
-                    mood=arguments["mood"],
-                    budget=arguments.get("budget"),
-                    location=arguments.get("location")
-                )
-                
-                result = []
-                for r in restaurants:
-                    result.append({
-                        "id": r.id,
-                        "name": r.name,
-                        "location": r.location,
-                        "cuisine_type": r.cuisine_type,
-                        "avg_price": r.avg_price,
-                        "rating": float(r.rating) if r.rating else 0,
-                        "description": r.description
-                    })
-                
-                return {
-                    "success": True,
-                    "data": result,
-                    "message": f"Rekomendasi untuk mood {arguments['mood']}"
-                }
-            
-            elif function_name == "update_user_preferences":
-                user = db_ops.update_user_preferences(
-                    user_id=arguments["user_id"],
-                    budget=arguments.get("default_budget"),
-                    location=arguments.get("default_location")
-                )
-                
-                return {
-                    "success": True,
-                    "message": "Preferensi berhasil diupdate!"
-                }
-            
-            else:
-                return {
-                    "success": False,
-                    "message": f"Unknown function: {function_name}"
-                }
+        if function_name == "get_weather":
+            return get_weather(arguments.get("location", Config.DEFAULT_LOCATION))
         
+        elif function_name == "calculate_calories":
+            return calculate_calories(
+                arguments.get("food_name"),
+                arguments.get("portion", "medium")
+            )
+        
+        elif function_name == "get_meal_time_recommendation":
+            return get_meal_time_recommendation(
+                arguments.get("time_of_day"),
+                arguments.get("mood")
+            )
+
+        elif function_name == "search_nearby_restaurants":
+            return search_nearby_restaurants(
+                arguments.get("location"),
+                arguments.get("radius", 3000),
+                arguments.get("keyword")
+            )
+        
+        else:
+            return {
+                "success": False,
+                "message": f"Unknown function: {function_name}"
+            }
+    
     except Exception as e:
         logger.error(f"Error executing tool {function_name}: {e}")
         return {
             "success": False,
             "message": f"Error: {str(e)}"
         }
+
+
+def get_weather(location: str) -> Dict[str, Any]:
+    """
+    Get weather information from OpenWeatherMap API
+    """
+    api_key = Config.WEATHER_API_KEY or os.getenv("OPENWEATHER_API_KEY")
+    api_url = Config.WEATHER_API_URL or "https://api.openweathermap.org/data/2.5/weather"
+
+    if not api_key:
+        logger.error("Weather API key not found.")
+        return {
+            "success": False,
+            "message": "Weather API key tidak ditemukan. Cek konfigurasi environment variable."
+        }
+    
+    try:
+        params = {
+            "q": location,
+            "appid": api_key,
+            "units": "metric",
+            "lang": "id"
+        }
+
+        logger.info(f"Fetching weather data for {location}...")
+        response = requests.get(api_url, params=params, timeout=8)
+
+        if response.status_code != 200:
+            logger.warning(f"Weather API response {response.status_code}: {response.text}")
+            return {
+                "success": False,
+                "message": f"Gagal mengambil data cuaca untuk {location}. Status: {response.status_code}"
+            }
+
+        data = response.json()
+        if "weather" not in data or "main" not in data:
+            return {
+                "success": False,
+                "message": "Respons dari API tidak lengkap."
+            }
+
+        weather_info = {
+            "success": True,
+            "location": data.get("name", location),
+            "temperature": round(data["main"].get("temp", 0)),
+            "feels_like": round(data["main"].get("feels_like", 0)),
+            "humidity": data["main"].get("humidity", 0),
+            "description": data["weather"][0].get("description", "tidak diketahui"),
+            "main": data["weather"][0].get("main", "").lower(),
+            "icon": data["weather"][0].get("icon", "")
+        }
+
+        # Food context
+        condition = weather_info["main"]
+        temp = weather_info["temperature"]
+
+        if "rain" in condition or "drizzle" in condition:
+            weather_info["food_context"] = "hujan - cocok untuk makanan hangat berkuah"
+        elif temp > 30:
+            weather_info["food_context"] = "panas - cocok untuk makanan segar dan dingin"
+        elif temp < 20:
+            weather_info["food_context"] = "dingin - cocok untuk makanan hangat"
+        else:
+            weather_info["food_context"] = "cuaca nyaman - bebas pilih makanan apapun"
+
+        logger.info(f"Weather fetched: {weather_info['description']} ({temp}°C)")
+        return weather_info
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Weather API request failed: {e}")
+        return {
+            "success": False,
+            "message": f"Gagal mengambil data cuaca untuk {location}: {str(e)}"
+        }
+
+    except Exception as e:
+        logger.error(f"Unexpected error in get_weather: {e}")
+        return {
+            "success": False,
+            "message": f"Terjadi kesalahan internal saat memproses cuaca untuk {location}"
+        }
+
+
+
+def calculate_calories(food_name: str, portion: str = "medium") -> Dict[str, Any]:
+    """
+    Calculate estimated calories for food (mock data)
+    """
+    try:
+        calorie_database = {
+            "nasi goreng": 450,
+            "nasi putih": 200,
+            "mie goreng": 400,
+            "ayam goreng": 300,
+            "ayam bakar": 250,
+            "sate ayam": 200,
+            "bakso": 350,
+            "soto": 300,
+            "gado-gado": 280,
+            "rendang": 400,
+            "pizza": 600,
+            "burger": 550,
+            "sushi": 300,
+            "ramen": 450,
+            "pasta": 500,
+            "salad": 150,
+        }
+        
+        multipliers = {"small": 0.7, "medium": 1.0, "large": 1.4}
+        
+        if not food_name:
+            return {"success": False, "message": "Nama makanan tidak boleh kosong"}
+        
+        if portion not in multipliers:
+            portion = "medium"
+        
+        food_lower = str(food_name).lower()
+        base_calories, matched_food = None, None
+        
+        for food, cal in calorie_database.items():
+            if food in food_lower or food_lower in food:
+                base_calories, matched_food = cal, food
+                break
+        
+        if base_calories is None:
+            if any(word in food_lower for word in ["nasi", "rice"]):
+                base_calories = 400
+                matched_food = food_name
+            elif any(word in food_lower for word in ["mie", "noodle", "pasta"]):
+                base_calories = 450
+                matched_food = food_name
+            elif any(word in food_lower for word in ["ayam", "chicken"]):
+                base_calories = 280
+                matched_food = food_name
+            else:
+                return {"success": False, "message": f"Data kalori '{food_name}' tidak tersedia."}
+        
+        final_calories = int(base_calories * multipliers.get(portion, 1.0))
+        
+        return {
+            "success": True,
+            "food": matched_food,
+            "portion": portion,
+            "calories": final_calories,
+            "protein_estimate": int(final_calories * 0.15 / 4),
+            "carbs_estimate": int(final_calories * 0.50 / 4),
+            "fat_estimate": int(final_calories * 0.35 / 9)
+        }
+    except Exception as e:
+        logger.error(f"Error in calculate_calories: {e}")
+        return {"success": False, "message": f"Error menghitung kalori: {str(e)}"}
+
+
+def get_meal_time_recommendation(time_of_day: str, mood: str = None) -> Dict[str, Any]:
+    """
+    Get meal recommendations based on time and mood
+    """
+    recommendations = {
+        "breakfast": {"default": ["Bubur ayam", "Roti bakar", "Nasi goreng"], "energetic": ["Smoothie bowl", "Granola"]},
+        "lunch": {"default": ["Nasi padang", "Soto ayam", "Bakso"], "happy": ["Pizza", "Burger"]},
+        "dinner": {"default": ["Ayam bakar", "Sate ayam"], "sad": ["Mie kuah", "Soto"]},
+        "snack": {"default": ["Pisang goreng", "Martabak mini"], "stressed": ["Coklat hangat", "Ice cream"]}
+    }
+    
+    time_recs = recommendations.get(time_of_day, recommendations["lunch"])
+    foods = time_recs.get(mood, time_recs["default"])
+    
+    return {"success": True, "time_of_day": time_of_day, "mood": mood or "default", "recommendations": foods}
+
+
+def search_nearby_restaurants(location: str, radius: int = 3000, keyword: str = None):
+    """
+    Cari restoran terdekat berdasarkan lokasi menggunakan Google Maps Places API.
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        return {"error": "API key Google Maps tidak ditemukan."}
+
+    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={location}&key={api_key}"
+    geo_resp = requests.get(geocode_url)
+    if geo_resp.status_code != 200:
+        return {"error": "Gagal mendapatkan koordinat lokasi."}
+    geo_data = geo_resp.json()
+
+    if not geo_data["results"]:
+        return {"error": f"Lokasi '{location}' tidak ditemukan di Google Maps."}
+
+    lat = geo_data["results"][0]["geometry"]["location"]["lat"]
+    lng = geo_data["results"][0]["geometry"]["location"]["lng"]
+
+    places_url = (
+        f"https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        f"?location={lat},{lng}&radius={radius}&type=restaurant&key={api_key}"
+    )
+    if keyword:
+        places_url += f"&keyword={keyword}"
+
+    resp = requests.get(places_url)
+    if resp.status_code != 200:
+        return {"error": "Gagal mengambil data restoran dari Google Maps."}
+
+    places_data = resp.json()
+    if not places_data.get("results"):
+        return {"error": f"Tidak ada restoran ditemukan di sekitar {location}."}
+
+    results = []
+    for r in places_data["results"][:3]:
+        place = {
+            "name": r.get("name"),
+            "address": r.get("vicinity"),
+            "rating": r.get("rating", "N/A"),
+            "maps_url": f"https://www.google.com/maps/place/?q=place_id:{r.get('place_id')}"
+        }
+        results.append(place)
+
+    return {"location": location, "total_found": len(places_data["results"]), "top_recommendations": results}
